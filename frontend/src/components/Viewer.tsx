@@ -63,6 +63,10 @@ const Viewer: React.FC<ViewerProps> = ({
     controls.enableDamping = false;
     controlsRef.current = controls;
 
+    // Use isSamMode to control OrbitControls enablement
+    // When isSamMode is true (any tool active), we disable navigation
+    controls.enabled = !isSamMode;
+
     scene.add(new THREE.GridHelper(200, 100, 0x444444, 0x222222));
     scene.add(new THREE.AxesHelper(20));
 
@@ -216,6 +220,13 @@ const Viewer: React.FC<ViewerProps> = ({
     canvas.addEventListener('mousedown', onMouseDown);
     return () => canvas.removeEventListener('mousedown', onMouseDown);
   }, [isSamMode, onSplatClick]);
+
+  // Toggle OrbitControls based on tool mode
+  useEffect(() => {
+    if (controlsRef.current) {
+        controlsRef.current.enabled = !isSamMode;
+    }
+  }, [isSamMode]);
 
   return <div ref={containerRef} className="w-full h-screen bg-neutral-900 overflow-hidden" />;
 };
