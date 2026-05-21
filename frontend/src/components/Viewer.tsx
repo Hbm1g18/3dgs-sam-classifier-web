@@ -60,7 +60,7 @@ const Viewer: React.FC<ViewerProps> = ({
     onCanvasReady(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+    controls.enableDamping = false;
     controlsRef.current = controls;
 
     scene.add(new THREE.GridHelper(200, 100, 0x444444, 0x222222));
