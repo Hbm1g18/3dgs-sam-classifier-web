@@ -28,7 +28,9 @@ const Viewer: React.FC<ViewerProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const currentSplatRef = useRef<SplatMesh | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const sparkRef = useRef<SparkRenderer | null>(null);
 
+  // Initialize Core Three.js
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -53,12 +55,13 @@ const Viewer: React.FC<ViewerProps> = ({
     const controls = new OrbitControls(camera, renderer.domElement);
     controlsRef.current = controls;
 
-    // sortRadial: false bypasses the readbackDepth logic that was crashing with 'No target'
-    const spark = new SparkRenderer({ renderer, sortRadial: false });
-    sceneRef.current.add(spark);
-
     scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x222222));
     scene.add(new THREE.AxesHelper(10));
+
+    // Initialize Spark
+    const spark = new SparkRenderer({ renderer, sortRadial: false });
+    scene.add(spark);
+    sparkRef.current = spark;
 
     const animate = () => {
       controls.update();
@@ -77,6 +80,7 @@ const Viewer: React.FC<ViewerProps> = ({
     window.addEventListener('resize', handleResize);
 
     return () => {
+      console.log("Viewer: Cleanup");
       renderer.setAnimationLoop(null);
       window.removeEventListener('resize', handleResize);
       spark.dispose?.();
@@ -84,8 +88,43 @@ const Viewer: React.FC<ViewerProps> = ({
       if (containerRef.current && renderer.domElement) {
         containerRef.current.removeChild(renderer.domElement);
       }
+      sparkRef.current = null;
+      sceneRef.current = null;
     };
   }, []);
+
+  // Handle Loading
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!fileUrl || !scene) return;
+
+    if (currentSplatRef.current) {
+        scene.remove(currentSplatRef.current);
+        currentSplatRef.current.dispose?.();
+    }
+
+    console.log("Viewer: Loading ->", fileUrl);
+    const splatMesh = new SplatMesh({ url: fileUrl });
+    splatMesh.rotation.x = Math.PI; 
+    scene.add(splatMesh);
+    currentSplatRef.current = splatMesh;
+
+    const checkInterval = setInterval(() => {
+        if (splatMesh.numSplats > 0) {
+            console.log("Viewer: Splat Ready. count:", splatMesh.numSplats);
+            clearInterval(checkInterval);
+            onSplatMeshLoaded(splatMesh);
+        }
+    }, 500);
+
+    return () => {
+        clearInterval(checkInterval);
+        if (splatMesh) {
+            scene.remove(splatMesh);
+            splatMesh.dispose?.();
+        }
+    };
+  }, [fileUrl, onSplatMeshLoaded]);
 
   // Handle Camera Reset
   useEffect(() => {
@@ -96,7 +135,6 @@ const Viewer: React.FC<ViewerProps> = ({
         const box = new THREE.Box3();
         const vec = new THREE.Vector3();
         
-        // Quick sample for centering
         const step = Math.max(1, Math.floor(mesh.numSplats / 2000));
         mesh.forEachSplat((index, center) => {
             if (index % step === 0) {
@@ -114,10 +152,6 @@ const Viewer: React.FC<ViewerProps> = ({
             const distance = maxDim / (2 * Math.tan(Math.PI * cameraRef.current.fov / 360));
             cameraRef.current.position.set(center.x, center.y + (maxDim * 0.2), center.z + distance * 1.5);
             controlsRef.current.target.copy(center);
-            controlsRef.current.update();
-        } else {
-            cameraRef.current.position.set(0, 20, 100);
-            controlsRef.current.target.set(0, 0, 0);
             controlsRef.current.update();
         }
     }
@@ -139,33 +173,6 @@ const Viewer: React.FC<ViewerProps> = ({
     canvas.addEventListener('mousedown', onMouseDown);
     return () => canvas.removeEventListener('mousedown', onMouseDown);
   }, [isSamMode]);
-
-  // Handle Loading
-  useEffect(() => {
-    if (!fileUrl || !sceneRef.current) return;
-
-    if (currentSplatRef.current) {
-        sceneRef.current.remove(currentSplatRef.current);
-        currentSplatRef.current.dispose?.();
-    }
-
-    console.log("Viewer: Loading ->", fileUrl);
-    const splatMesh = new SplatMesh({ url: fileUrl });
-    splatMesh.rotation.x = Math.PI; 
-    sceneRef.current.add(splatMesh);
-    currentSplatRef.current = splatMesh;
-
-    // Use initialized promise if available, or poll numSplats
-    const checkInterval = setInterval(() => {
-        if (splatMesh.numSplats > 0) {
-            console.log("Viewer: Splat Ready. count:", splatMesh.numSplats);
-            clearInterval(checkInterval);
-            onSplatMeshLoaded(splatMesh);
-        }
-    }, 500);
-
-    return () => clearInterval(checkInterval);
-  }, [fileUrl, onSplatMeshLoaded]);
 
   return <div ref={containerRef} className="w-full h-screen bg-black" />;
 };
