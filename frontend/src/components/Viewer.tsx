@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
@@ -29,46 +29,72 @@ const Viewer: React.FC<ViewerProps> = ({
   const currentSplatRef = useRef<SplatMesh | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const sparkRef = useRef<SparkRenderer | null>(null);
+  
+  const [isReady, setIsReady] = useState(false);
 
-  // Initialize Core Three.js
   useEffect(() => {
     if (!containerRef.current) return;
+    
+    // Ensure clean state
+    containerRef.current.innerHTML = '';
+    console.log("Viewer: [1/6] Atomic Initialization...");
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050505);
+    scene.background = new THREE.Color(0x0a0a0a);
     sceneRef.current = scene;
     
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
-    camera.position.set(0, 10, 50);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100000);
+    camera.position.set(0, 30, 100);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ 
         antialias: false,
         preserveDrawingBuffer: true,
-        alpha: true
+        alpha: false,
+        powerPreference: "high-performance"
     });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
     onCanvasReady(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
     controlsRef.current = controls;
 
-    scene.add(new THREE.GridHelper(100, 100, 0x333333, 0x222222));
-    scene.add(new THREE.AxesHelper(10));
+    scene.add(new THREE.GridHelper(200, 100, 0x444444, 0x222222));
+    scene.add(new THREE.AxesHelper(20));
 
-    // Initialize Spark
-    const spark = new SparkRenderer({ renderer, sortRadial: false });
-    scene.add(spark);
-    sparkRef.current = spark;
+    // Initialize Spark with autoUpdate false to prevent async crashes
+    let spark: SparkRenderer | null = null;
+    try {
+        spark = new SparkRenderer({ 
+            renderer, 
+            sortRadial: false, 
+            autoUpdate: false // Manual update to avoid background 'No target' errors
+        });
+        scene.add(spark);
+        sparkRef.current = spark;
+    } catch (e) {
+        console.error("Viewer: Spark Init Error", e);
+    }
 
+    let animId: number;
     const animate = () => {
-      controls.update();
+      animId = requestAnimationFrame(animate);
+      
+      if (controls) controls.update();
+      
+      // Manually drive Spark update
+      if (spark) {
+          spark.update({ scene, camera });
+      }
+      
       renderer.render(scene, camera);
       onCameraUpdate(camera);
     };
-    renderer.setAnimationLoop(animate);
+    animate();
 
     const handleResize = () => {
       const width = window.innerWidth;
@@ -79,31 +105,45 @@ const Viewer: React.FC<ViewerProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
+    setIsReady(true);
+
     return () => {
-      console.log("Viewer: Cleanup");
-      renderer.setAnimationLoop(null);
+      console.log("Viewer: Disposing...");
+      setIsReady(false);
+      cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
-      spark.dispose?.();
-      renderer.dispose();
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
+      
+      if (spark) {
+          scene.remove(spark);
+          spark.dispose?.();
       }
+      
+      if (controls) controls.dispose();
+      renderer.dispose();
+      
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+      
       sparkRef.current = null;
       sceneRef.current = null;
+      rendererRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
     };
   }, []);
 
-  // Handle Loading
+  // Handle Model Loading
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!fileUrl || !scene) return;
+    if (!isReady || !fileUrl || !sceneRef.current) return;
 
+    const scene = sceneRef.current;
     if (currentSplatRef.current) {
         scene.remove(currentSplatRef.current);
         currentSplatRef.current.dispose?.();
     }
 
-    console.log("Viewer: Loading ->", fileUrl);
+    console.log("Viewer: Loading model ->", fileUrl);
     const splatMesh = new SplatMesh({ url: fileUrl });
     splatMesh.rotation.x = Math.PI; 
     scene.add(splatMesh);
@@ -124,13 +164,16 @@ const Viewer: React.FC<ViewerProps> = ({
             splatMesh.dispose?.();
         }
     };
-  }, [fileUrl, onSplatMeshLoaded]);
+  }, [isReady, fileUrl, onSplatMeshLoaded]);
 
   // Handle Camera Reset
   useEffect(() => {
-    if (resetCounter > 0 && cameraRef.current && controlsRef.current && currentSplatRef.current) {
-        console.log("Viewer: Manual Camera Reset");
+    if (isReady && resetCounter > 0 && cameraRef.current && controlsRef.current && currentSplatRef.current) {
         const mesh = currentSplatRef.current;
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        
+        console.log("Viewer: Resetting view...");
         mesh.updateMatrixWorld(true);
         const box = new THREE.Box3();
         const vec = new THREE.Vector3();
@@ -149,32 +192,32 @@ const Viewer: React.FC<ViewerProps> = ({
             const size = new THREE.Vector3();
             box.getSize(size);
             const maxDim = Math.max(size.x, size.y, size.z);
-            const distance = maxDim / (2 * Math.tan(Math.PI * cameraRef.current.fov / 360));
-            cameraRef.current.position.set(center.x, center.y + (maxDim * 0.2), center.z + distance * 1.5);
-            controlsRef.current.target.copy(center);
-            controlsRef.current.update();
+            const distance = maxDim / (2 * Math.tan(Math.PI * camera.fov / 360));
+            
+            camera.position.set(center.x, center.y + (maxDim * 0.2), center.z + distance * 1.5);
+            controls.target.copy(center);
+            controls.update();
         }
     }
-  }, [resetCounter]);
+  }, [isReady, resetCounter]);
 
   // Handle SAM Click Handler
-  const clickHandlerRef = useRef(onSplatClick);
-  useEffect(() => { clickHandlerRef.current = onSplatClick; }, [onSplatClick]);
   useEffect(() => {
     const canvas = rendererRef.current?.domElement;
     if (!canvas) return;
+    
     const onMouseDown = (event: MouseEvent) => {
         if (!isSamMode) return;
         const rect = canvas.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
-        clickHandlerRef.current(x, y);
+        onSplatClick(x, y);
     };
     canvas.addEventListener('mousedown', onMouseDown);
     return () => canvas.removeEventListener('mousedown', onMouseDown);
-  }, [isSamMode]);
+  }, [isSamMode, onSplatClick]);
 
-  return <div ref={containerRef} className="w-full h-screen bg-black" />;
+  return <div ref={containerRef} className="w-full h-screen bg-neutral-900 overflow-hidden" />;
 };
 
 export default Viewer;

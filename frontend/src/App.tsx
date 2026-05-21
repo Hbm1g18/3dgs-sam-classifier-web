@@ -225,7 +225,11 @@ function App() {
   // Trigger visibility update when layers change or mesh is loaded
   useEffect(() => {
     if (isLoaded) {
-        updateSplatVisibility();
+        // Delay update slightly to give the renderer room to breathe
+        const timer = setTimeout(() => {
+            updateSplatVisibility();
+        }, 100);
+        return () => clearTimeout(timer);
     }
   }, [isLoaded, visibleClasses, updateSplatVisibility]);
 
