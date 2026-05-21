@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.env
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Weights
+*.pth
+*.onnx
+
+# Data
+*.ply
+*.spz
+*.splat
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
